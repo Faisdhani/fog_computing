@@ -1,11 +1,25 @@
-.. _about:
+.. _api_reference:
 
-=====
-ABOUT
-=====
+=============
+API REFERENCE
+=============
 
-YAFS is designed and implemented by Isaac Lera and Carlos Guerrero. Both work at Computer Science Faculty in the University Of Balearic Islands.
+The API reference provides detailed descriptions of YAFS's classes and
+functions. It should be helpful if you plan to extend YAFS with custom
+components.
 
 
+.. toctree::
+   :maxdepth: 1
 
-
+   yafs
+   yafs.core
+   yafs.topology
+   yafs.application
+   yafs.population
+   yafs.placement
+   yafs.selection
+   yafs.distribution
+   yafs.stats
+   yafs.metrics
+   yafs.utils
