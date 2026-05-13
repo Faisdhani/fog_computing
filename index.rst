@@ -1,14 +1,15 @@
-.. _examples:
+.. _intro:
 
-========
-Examples
-========
+=================
+YAFS in 5 Minutes
+=================
 
-Tutorial example is at 50% of progress.
-
+In this section, you'll learn the basics of YAFS in just a few minutes.
 
 .. toctree::
-   :maxdepth: 1
+   :maxdepth: 2
 
+   installation
+   glossary
+   basic
 
-   tutorial_example
