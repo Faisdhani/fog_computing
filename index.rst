@@ -1,25 +1,14 @@
-.. _api_reference:
+.. _examples:
 
-=============
-API REFERENCE
-=============
+========
+Examples
+========
 
-The API reference provides detailed descriptions of YAFS's classes and
-functions. It should be helpful if you plan to extend YAFS with custom
-components.
+Tutorial example is at 50% of progress.
 
 
 .. toctree::
    :maxdepth: 1
 
-   yafs
-   yafs.core
-   yafs.topology
-   yafs.application
-   yafs.population
-   yafs.placement
-   yafs.selection
-   yafs.distribution
-   yafs.stats
-   yafs.metrics
-   yafs.utils
+
+   tutorial_example
