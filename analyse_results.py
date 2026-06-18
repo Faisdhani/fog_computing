@@ -1,85 +1,95 @@
-from yafs.metrics import *
-import pandas as pd
-import glob
-import networkx as nx
+from yafs.stats import Stats
+import numpy as np
 import matplotlib.pyplot as plt
+import pandas as pd
+from pandas import Series, date_range
+from matplotlib.ticker import FormatStrFormatter
+import os
+
+# for size in [100,1000,10000,100000,1000000]:
+time_loops = [["M.Action"]]
 
 
+#### ANALYSE FILES YAFS
 
-community_size = [50,100,200,300]
+app1 = "app1"
+app2 = "app2"
 
-topologies = {
-    "BarabasiAlbert": "data/BarabasiAlbert2.graphml",
-    "Grid": "data/grid200.graphml",
-    "RandomEuclidean": "data/RandomEuclidean.graphml",
-    "Lobster": "data/Lobster.graphml",
+size = 12000
 
-}
-# functions =       ["Cluster","Eigenvector","Betweenness_centrality","Current_flow_betweenness_centrality"]
-# labelsFunctions = ["Cloud","Eigenvector","Betweenness","Current Flow Betweenness"]
-
-
-functions =       ["Cluster","Eigenvector"]
-labelsFunctions = ["Cloud","Eigenvector"]
-
-values = [[],[],[],[]]
-
-m = Metrics()
-
-for topo in topologies:
-    print(topo)
-    for size in community_size:
-        print("\t",size)
-        vcluster = 0.0
-        for idx, f in enumerate(functions):
-            m.load_results("results_exp/results_exp_%s_%i_%s" % (topo,size,f))
-            df,dl = m.get()
-            print("\t\t%s :%i" %(labelsFunctions[idx], len(dl)))
-            if vcluster == 0.0:
-                vcluster = len(dl)+0.0
-            else:
-                print("\t\tSpeedup %f" %(float(len(dl))/vcluster))
-            values[idx].append(len(dl))
-exit()
-
-experiments = len(community_size)
-
-fig, ax = plt.subplots(figsize=(8,4))
-width = 0.18
-
-colors = ["firebrick","yellowgreen","navy","darkorange","purple"]
-
-index = np.arange(experiments)
-p = range(0,5)
-N = len(functions)
-
-# patterns = ('x', ' ', ' ', 'o', 'O', '.')
-
-for idx,f in enumerate(labelsFunctions):
-    print(idx)
-    print(f)
-    p[idx] = plt.bar(index+(width*idx), values[idx], width, color=colors[idx], label=f) #hatch=patterns[idx])
+#s = Stats(defaultPath=path+"Results_%s"%(size))
+s1 = Stats(defaultPath=os.path.join(os.getcwd(), "Results_%s_singleApp1" % (size)))
+#s2 = Stats(defaultPath=path+"Results_%s_singleApp2" % (size))
+#Network
+#s.showResults2(size, time_loops=time_loops)
+#app1 based on dinamic Edge
+s1.showResults2(size, time_loops=time_loops)
+#app2 based on static Cloud
+#s2.showResults2(size, time_loops=time_loops)
 
 
+df = s1.df
+dfl = s1.df_link
 
-plt.xticks(index + N*width/2.7, ("50","100","200","300"))
-# plt.yticks(np.arange(0, 120, 20))
-# plt.ylim(2000,8000)
-ax.set_ylabel("Number of transmitted messages",fontsize=16)
-ax.set_xlabel("Number of datatypes",fontsize=16)
-
-# fig.savefig('test.jpg')
-# ax.set_title("Lobster topology")
-plt.legend((p[0],p[1],p[2],p[3]), labelsFunctions,fancybox=True,loc='upper left',framealpha=0.65,fontsize=14)
-plt.gcf().subplots_adjust(bottom=0.15)
-
-# fig.canvas.draw()
-ax.grid(True)
-
-plt.savefig('Grid.pdf', format='pdf', dpi=600)
-plt.show()
+#df["date"]=df.time_in.astype('timedelta64[s]')
+df["date"]=df.time_in.astype('datetime64[s]')
+df.index = df.date
 
 
+dfap1 = df[df["app"]=="app1"]
+dfap1 = dfap1.resample('300s').agg(dict(time_latency='mean'))
+
+timeLatency = dfap1.time_latency.values
+
+ticks = range(len(timeLatency))
+ticksV = np.array(ticks)*300
+
+#index = dfap1.index
+#rng = pd.date_range('01/01/1970',periods=20,freq="300s")
+
+values = list(range(len(ticks)))
+
+for x in range(len(ticks)):
+    if x<10:
+        values[x]=1
+    elif x>28:
+        values[x]=20
+    else:
+        values[x]=values[x-1]+1
+
+#OK
+        ### Latency Time and Allocation replicas
+fig = plt.figure()
+ax1 = fig.add_subplot(111)
+ax1.plot(ticks, timeLatency, '-')
+ax1.set_xlabel("Simulation time", fontsize=16)
+ax1.set_ylabel("Latency time", fontsize=16)
+ax2 = ax1.twinx()
+ax2.set_ylabel("Number of allocation replicas", fontsize=16)
+ax2.set_yticks(ticks)
+ax2.set_xlim(0,35)
+ax2.plot(ticks, values, c="g",linestyle='-', marker="o",markersize=4)
+
+time_labels = []
+for t in ax2.get_xticks():
+    time_labels.append( "%3.0f"%(t*300))
+ax1.set_xticklabels(time_labels)
+plt.savefig('figure8b.pdf', format='pdf', dpi=600)
+ 
+#dfl["date"]=dfl.ctime.astype('datetime64[s]')
+#dfl.index = dfl.date
+#dfl1 = dfl.resample('300s').agg(dict(buffer='mean'))
+#
+#fig = plt.figure()
+#ax1 = fig.add_subplot(111)
+#ax1.plot(ticks, dfl1.buffer.values, '-')
+#ax1.set_xlabel("Simulation time", fontsize=16)
+#ax1.set_ylabel("Number of messages enqueued", fontsize=16)
+#
+#time_labels = []
+#for t in ax1.get_xticks():
+#    time_labels.append( "%3.0f"%(t*300))
+#ax1.set_xticklabels(time_labels)
 
 
 

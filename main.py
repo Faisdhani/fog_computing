@@ -1,224 +1,147 @@
-"""
-
-    This example
-
-    @author: Isaac Lera & Carlos Guerrero
-
-"""
-import json
 import random
-import networkx as nx
-import argparse
-from pathlib import Path
-import time
-import numpy as np
+"""
 
-from selection_multipleDeploys import DeviceSpeedAwareRouting
-from jsonPopulation import JSONPopulation
+    This example implements a simple evolutive deployment of fog devices to study the latency of two applications.
+    There is a comparison between:
+    - One application has a cloud placement
+    - Another one (equivalent application) has an evolutive deployement on fog devices
+
+    @author: isaac
+
+"""
+
+import argparse
 
 from yafs.core import Sim
-from yafs.application import Application,Message,fractional_selectivity
+from yafs.application import Application,Message
 from yafs.topology import Topology
-from yafs.placement import JSONPlacement,JSONPlacementOnCloud
-from yafs.distribution import *
+from yafs.placement import *
+from yafs.distribution import deterministic_distribution,deterministicDistributionStartPoint
+
+from Evolutive_population import Evolutive,Statical
+from selection_multipleDeploys import  CloudPath_RR,BroadPath
+
+import networkx as nx
+import numpy as np
+import copy
+import itertools
+import time
+import operator
+
+RANDOM_SEED = 1
+
+def create_application(name):
+    # APLICATION
+    a = Application(name=name)
+
+    a.set_modules([{"Generator":{"Type":Application.TYPE_SOURCE}},
+                   {"Actuator": {"Type": Application.TYPE_SINK}}
+                   ])
+
+    m_egg = Message("M.Action", "Generator", "Actuator", instructions=100, bytes=10)
+    a.add_source_messages(m_egg)
+    return a
 
 
-def create_applications_from_json(data):
-    applications = {}
-    for app in data:
-        a = Application(name=app["name"])
-        modules = [{"None":{"Type":Application.TYPE_SOURCE}}]
-        for module in app["module"]:
-            modules.append({module["name"]: {"RAM": module["RAM"], "Type": Application.TYPE_MODULE}})
-        a.set_modules(modules)
+# @profile
+def main(simulated_time):
 
-        ms = {}
-        for message in app["message"]:
-            #print("Creando mensaje: %s" %message["name"])
-            ms[message["name"]] = Message(message["name"],message["s"],message["d"],instructions=message["instructions"],bytes=message["bytes"])
-            if message["s"] == "None":
-                a.add_source_messages(ms[message["name"]])
-
-        #print("Total mensajes creados %i" %len(ms.keys()))
-        for idx, message in enumerate(app["transmission"]):
-            if "message_out" in message.keys():
-                a.add_service_module(message["module"],ms[message["message_in"]], ms[message["message_out"]], fractional_selectivity, threshold=1.0)
-            else:
-                a.add_service_module(message["module"], ms[message["message_in"]])
-
-        applications[app["name"]]=a
-
-    return applications
-
-
-###
-# Thanks to this function, the user can control about the elemination of the nodes according with the modules deployed (see also DynamicFailuresOnNodes example)
-###
-"""
-It returns the software modules (a list of identifiers of DES process) deployed on this node
-"""
-def getProcessFromThatNode(sim, node_to_remove):
-    if node_to_remove in sim.alloc_DES.values():
-        DES = []
-        # This node can have multiples DES processes on itself
-        for k, v in sim.alloc_DES.items():
-            if v == node_to_remove:
-                DES.append(k)
-        return DES,True
-    else:
-        return [],False
-
-
-
-"""
-It controls the elimination of a node
-"""
-
-def failureControl(sim,filelog,ids):
-    global idxFControl # WARNING! This global variable has to be reset in each simulation test
-
-    nodes = list(sim.topology.G.nodes())
-    if len(nodes)>1:
-        try:
-            node_to_remove = ids[idxFControl]
-            idxFControl +=1
-
-            keys_DES,someModuleDeployed = getProcessFromThatNode(sim, node_to_remove)
-
-            # print("\n\nRemoving node: %i, Total nodes: %i" % (node_to_remove, len(nodes)))
-            # print("\tStopping some DES processes: %s\n\n"%keys_DES)
-            filelog.write("%i,%s,%d\n"%(node_to_remove, someModuleDeployed,sim.env.now))
-
-            ##print(some information:)
-            # for des in keys_DES:
-            #     if des in sim.alloc_source.keys():
-            #         print("Removing a Gtw/User entity\t"*4)
-
-            sim.remove_node(node_to_remove)
-            for key in keys_DES:
-                sim.stop_process(key)
-        except IndexError:
-            None
-
-    else:
-        sim.stop = True ## We stop the simulation
-
-
-def main(simulated_time,experimento,ilpPath,it):
+    random.seed(RANDOM_SEED)
+    np.random.seed(RANDOM_SEED)
     """
     TOPOLOGY from a json
     """
-    t = Topology()
-    dataNetwork = json.load(open(experimento+'network.json'))
-    t.load(dataNetwork)
-    nx.write_gexf(t.G,"graph_main") # you can export the Graph in multiples format to view in tools like Gephi, and so on.
 
+    t = Topology()
+    t.G = nx.read_graphml("Euclidean.graphml")
+
+    ls = list(t.G.nodes)
+    li = {x: int(x) for x in ls}
+    nx.relabel_nodes(t.G, li, False) #Transform str-labels to int-labels
+
+    print("Nodes: %i" %len(t.G.nodes()))
+    print("Edges: %i" %len(t.G.edges()))
+    #MANDATORY fields of a link
+    # Default values =  {"BW": 1, "PR": 1}
+    attPR_BW = {x: 1 for x in t.G.edges()}
+
+    nx.set_edge_attributes(t.G, name='BW', values=attPR_BW)
+    nx.set_edge_attributes(t.G, name='PR', values=attPR_BW)
+
+    centrality = nx.betweenness_centrality(t.G)
+    nx.set_node_attributes(t.G, name="centrality", values=centrality)
+
+    sorted_clustMeasure = sorted(centrality.items(), key=operator.itemgetter(1), reverse=True)
+
+    top20_devices =  sorted_clustMeasure[:20]
+    main_fog_device = copy.copy(top20_devices[0][0])
+
+    print("-" * 20)
+    print("Top 20 centralised nodes:")
+    for item in top20_devices:
+        print(item)
+    print("-"*20)
     """
     APPLICATION
     """
-    dataApp = json.load(open(experimento+'appDefinition.json'))
-    apps = create_applications_from_json(dataApp)
-    for app in apps:
-        print(apps[app])
+    app1 = create_application("app1")
+    app2 = create_application("app2")
 
     """
     PLACEMENT algorithm
     """
-    placementJson = json.load(open(experimento+'allocDefinition%s.json'%ilpPath))
-    placement = JSONPlacement(name="Placement",json=placementJson)
+    #There are not modules to place.
+    placement = NoPlacementOfModules("NoPlacement")
 
-    ### Placement histogram
-
-    # listDevices =[]
-    # for item in placementJson["initialAllocation"]:
-    #     listDevices.append(item["id_resource"])
-    # import matplotlib.pyplot as plt
-    # print(listDevices)
-    # print(np.histogram(listDevices,bins=range(101)))
-    # plt.hist(listDevices, bins=100)  # arguments are passed to np.histogram
-    # plt.title("Placement Histogram")
-    # plt.show()
-    ## exit()
     """
     POPULATION algorithm
     """
-    dataPopulation = json.load(open(experimento+'usersDefinition.json'))
-    pop = JSONPopulation(name="Statical",json=dataPopulation,iteration=it)
+    number_generators = int(len(t.G)*0.1)
+    print(number_generators)
+    dDistribution = deterministicDistributionStartPoint(3000,300,name="Deterministic")
+    dDistributionSrc = deterministic_distribution(name="Deterministic", time=10)
+    pop1 = Evolutive(top20_devices,number_generators,name="top",activation_dist=dDistribution)
+    pop1.set_sink_control({"app":app1.name,"number": 1, "module": app1.get_sink_modules()})
+    pop1.set_src_control(
+        {"number": 1, "message": app1.get_message("M.Action"), "distribution": dDistributionSrc})
 
 
-    """
+    pop2 = Statical(number_generators,name="Statical")
+    pop2.set_sink_control({"id": main_fog_device, "number": number_generators, "module": app2.get_sink_modules()})
+
+    pop2.set_src_control(
+        {"number": 1, "message": app2.get_message("M.Action"), "distribution": dDistributionSrc})
+
+    #In addition, a source includes a distribution function:
+
+
+    """--
     SELECTOR algorithm
     """
-    selectorPath = DeviceSpeedAwareRouting()
+    selectorPath1 = BroadPath()
+
+    selectorPath2 = CloudPath_RR()
+
 
     """
     SIMULATION ENGINE
     """
 
-    stop_time = simulated_time
-    s = Sim(t, default_results_path=experimento + "Results_%s_%i_%i" % (ilpPath, stop_time,it))
+    s = Sim(t, default_results_path="Results_%s_singleApp1" % (simulated_time))
+    s.deploy_app2(app1, placement, pop1, selectorPath1)
+    # s.deploy_app(app2, placement, pop2,  selectorPath2)
 
-    """
-    Failure process
-    """
-    # time_shift = 10000
-    # # distribution = deterministicDistributionStartPoint(name="Deterministic", time=time_shift,start=10000)
-    # distribution = deterministicDistributionStartPoint(name="Deterministic", time=time_shift, start=1)
-    # failurefilelog = open(experimento+"Failure_%s_%i.csv" % (ilpPath,stop_time),"w")
-    # failurefilelog.write("node, module, time\n")
-    # idCloud = t.find_IDs({"type": "CLOUD"})[0] #[0] -> In this study there is only one CLOUD DEVICE
-    # centrality = np.load(pathExperimento+"centrality.npy")
-    # s.deploy_monitor("Failure Generation", failureControl, distribution,sim=s,filelog=failurefilelog,ids=centrality)
+    s.run(simulated_time,test_initial_deploy=False,show_progress_monitor=False)
+    # s.draw_allocated_topology() # for debugging
 
-    # randomValues = np.load(pathExperimento+"random.npy")
-    # s.deploy_monitor("Failure Generation", failureControl, distribution,sim=s,filelog=failurefilelog,ids=randomValues)
-
-    #For each deployment the user - population have to contain only its specific sources
-    for aName in apps.keys():
-        print("Deploying app: ",aName)
-        pop_app = JSONPopulation(name="Statical_%s"%aName,json={},iteration=it)
-        data = []
-        for element in pop.data["sources"]:
-            if element['app'] == aName:
-                data.append(element)
-        pop_app.data["sources"]=data
-
-        s.deploy_app2(apps[aName], placement, pop_app, selectorPath)
-
-
-    s.run(stop_time, test_initial_deploy=False, show_progress_monitor=False) #TEST to TRUE
-
-
-    ## Enrouting information
-    # print("Values")
-    # print(selectorPath.cache.values())
-
-
-    #failurefilelog.close()
-
-    # #CHECKS
-    #print(s.topology.G.nodes)
-    #s.print_debug_assignaments()
-
-idxFControl = 0
 if __name__ == '__main__':
+    import logging.config
     import os
-    pathExperimento = "testjsons/"
 
-    timeSimulation = 100
-    print(os.getcwd())
-    # logging.config.fileConfig(os.getcwd()+'/logging.ini')
-    for i in range(50):
-    #for i in  [0]:
-        start_time = time.time()
-        random.seed(i)
-        np.random.seed(i)
+    logging.config.fileConfig(os.getcwd()+'/logging.ini')
 
-        print("Running Partition")
-        main(simulated_time=timeSimulation,  experimento=pathExperimento,ilpPath='',it=i)
-        print("\n--- %s seconds ---" % (time.time() - start_time))
-        start_time = time.time()
+    start_time = time.time()
 
-    print("Simulation Done")
+    main(simulated_time=12000)
 
-
+    print("\n--- %s seconds ---" % (time.time() - start_time))
