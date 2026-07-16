@@ -1,5 +1,5 @@
 """
-    In this simulation, the module/service of the apps changes the allocation on the nodes randomly each time.
+    In this simulation, the number of nodes changes randomly each time.
 
 
     @author: Isaac Lera
@@ -78,26 +78,54 @@ class CustomStrategy():
 
 
     def __call__(self, sim, routing):
-        logging.info("Activating Custom process - number %i " % self.activations)
+
+        # logging.info("Activating Custom process - number %i "%self.activations)
         self.activations += 1
-        routing.invalid_cache_value = True # when the service change the cache of the Path.routing is outdated.
+        routing.invalid_cache_value = True # when the topology changes the cache of the Path.routing is outdated.
 
-        # Current deployed services
-        # print("Current deployed services> module:list(nodes)")
-        current_services = self.get_current_services(sim)
-        # print(current_services)
+        if random.random()<0.7:
+        # We create a new node, between two other nodes.
+            node1 = random.sample(sim.topology.G.nodes(),1)[0]
+            node2 = random.sample(sim.topology.G.nodes(), 1)[0]
+            newId = list(sim.topology.G.nodes())[-1]
+            try:
+                newId = newId+1
+            except:
+                print("Be careful with the type of IDs in your Jsons (str or int)!!!!!")
+                exit()
 
-        # We move all the service to other random node
-        for service in current_services:
-            for currentNode in current_services[service]:
-                newNode = random.sample(sim.topology.G.nodes(),1)[0]
-                if not self.is_already_deployed(sim,service,newNode):
-                    self.undeploy_module(sim,service,currentNode)
-                    self.deploy_module(sim,service,newNode)
-                    logging.info("Moving Service %s from %s to %s node"%(service,currentNode,newNode))
+            # We create the new node and we define mandatory attr.
+            att = {"IPT":100}
+            sim.topology.G.add_node(int(newId),**att)
+
+            att = {"BW": 10, "PR": 10}
+            sim.topology.G.add_edge(int(node1), int(newId), **att)
+            sim.topology.G.add_edge(int(newId), int(node2), **att)
+
+            logging.info(" A new node is created between %i and %i with ID: %i"%(node1,node2,newId))
+        else:
+        # We drop a node.
+            code = random.sample(sim.topology.G.nodes(), 1)[0]
+            try:
+                ## ONE WAY
+                # edges_to_remove = [e for e in sim.topology.G.edges() if int(code) in e]
+                # for edge in edges_to_remove:
+                #     att = sim.topology.G[edge[0]][edge[1]]
+                #     sim.topology.G.remove_edge(*edge)
+
+                ## OTHER WAY
+                # sim.topology.G.remove_node(code)
+
+                ## Elegant way - we remove all process linked on it
+                if code!=0:
+                    sim.remove_node(code)
+
+            except nx.NetworkXError:
+                None
 
 
-def main(stop_time, it,folder_results):
+
+def main(stop_time, it, folder_results):
 
 
     """
@@ -114,7 +142,7 @@ def main(stop_time, it,folder_results):
     # PR and BW are 1 unit
     attPR_BW = {x: 1 for x in t.G.edges()}
     nx.set_edge_attributes(t.G, name="PR", values=attPR_BW)
-    nx.set_edge_attributes(t.G, name="BW", values=attPR_BW) 
+    nx.set_edge_attributes(t.G, name="BW", values=attPR_BW)
     ## Attr. on nodes
     # IPT
     attIPT = {x: 100 for x in t.G.nodes()}
@@ -170,14 +198,14 @@ def main(stop_time, it,folder_results):
     This internal monitor in the simulator (a DES process) changes the sim's behaviour. 
     You can have multiples monitors doing different or same tasks.
     
-    In this case, it changes the service's allocation, the node where the service is.
+    In this case: it changes the topology.
     """
     dist = deterministicDistributionStartPoint(stop_time/4., stop_time/2.0/10.0, name="Deterministic")
     evol = CustomStrategy(folder_results)
-    s.deploy_monitor("RandomAllocation",
+    s.deploy_monitor("CrazyTopology",
                      evol,
                      dist,
-                     **{"sim": s, "routing": selectorPath}) # __call__ args
+                     **{"sim": s, "routing": selectorPath}) # __call__ args 
 
 
 
@@ -188,6 +216,11 @@ def main(stop_time, it,folder_results):
     s.run(stop_time)  # To test deployments put test_initial_deploy a TRUE
     s.print_debug_assignaments()
 
+    """
+    We store the new topology
+    """
+    nx.write_gexf(s.topology.G,folder_results+"theNew_topology.gexf") 
+    
 
 if __name__ == '__main__':
 
@@ -197,6 +230,7 @@ if __name__ == '__main__':
     folder_results = Path("results/")
     folder_results.mkdir(parents=True, exist_ok=True)
     folder_results = str(folder_results)+"/"
+
 
     nIterations = 1  # iteration for each experiment
     simulationDuration = 20000
@@ -214,20 +248,8 @@ if __name__ == '__main__':
 
     print("Simulation Done!")
 
-
-
+    
     # Analysing the results. 
     dfl = pd.read_csv(folder_results+"sim_trace"+"_link.csv")
     print("Number of total messages between nodes: %i"%len(dfl))
 
-    df = pd.read_csv(folder_results+"sim_trace.csv")
-    print("Number of requests handled by deployed services: %i"%len(df))
-
-    dfapp0 = df[df.app == 0].copy() # a new df with the requests handled by app 0
-    print(dfapp0.head())
-
-    print("Different nodes where the app0 is deployed")
-    print(np.unique(dfapp0["TOPO.dst"]))
-    
-    print("Number of requests handled at each position: \nid_node - requests")
-    print(dfapp0.groupby(["TOPO.dst"])["id"].count())
