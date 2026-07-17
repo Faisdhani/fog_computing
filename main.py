@@ -1,6 +1,5 @@
 """
-    In this simulation, the number of nodes changes randomly each time.
-
+    In this simulation, the users moves in different nodes. There are linked to another nodes.
 
     @author: Isaac Lera
 """
@@ -29,104 +28,57 @@ from collections import defaultdict
 
 class CustomStrategy():
 
-    def __init__(self,pathResults):
+    def __init__(self,pathResults,listIdApps):
         self.activations = 0
         self.pathResults = pathResults
-
-    def deploy_module(self,sim,service,node):
-        app_name = int(service[0:service.index("_")])
+        self.listUsers = []
+        self.numberMaxUsers = 100
+        self.listIdApps = listIdApps
+        self.placeAt = {}
+    def createUser(self,sim):
+        app_name = random.sample(self.listIdApps, 1)[0]
         app = sim.apps[app_name]
-        services = app.services
-        idDES = sim.deploy_module(app_name, service, services[service], [node])
-        # with this `identifier of the DES process` (idDES) you can control it
-
-    def undeploy_module(self,sim,service,node):
-        app_name = int(service[0:service.index("_")])
-        des = sim.get_DES_from_Service_In_Node(node, app_name, service)
-        sim.undeploy_module(app_name, service,des)
-
-    def is_already_deployed(self,sim,service_name,node):
-        app_name = service_name[0:service_name.index("_")]
-
-        all_des = []
-        for k, v in sim.alloc_DES.items():
-            if v == node:
-                all_des.append(k)
-
-        # Clearing other related structures
-        for des in sim.alloc_module[int(app_name)][service_name]:
-            if des in all_des:
-                return True
-
-
-    def get_current_services(self,sim):
-        """ returns a dictionary with name_service and a list of node where they are deployed
-        example: defaultdict(<type 'list'>, {u'2_19': [15], u'3_22': [5]})
-        """
-        # it returns all entities related to a node: modules, sources/users, etc.
-        current_services = sim.get_alloc_entities()
-        # here, we only need modules (not users)
-        current_services = dict((k, v) for k, v in current_services.items() if len(v)>0)
-        deployed_services = defaultdict(list)
-        for node,services in current_services.items():
-            for service_name in services:
-                if not "None" in service_name:
-                     deployed_services[service_name[service_name.index("#")+1:]].append(node)
-
-
-        return deployed_services
-
+        msg = app.get_message("M.USER.APP.%i" % app_name)
+        dist = deterministic_distribution(30, name="Deterministic")
+        node = random.sample(sim.topology.G.nodes(), 1)[0]
+        idDES = sim.deploy_source(app_name, id_node=node, msg=msg, distribution=dist)
+        self.listUsers.append(idDES)
+        self.placeAt[idDES] = node
+        return idDES
 
     def __call__(self, sim, routing):
-
-        # logging.info("Activating Custom process - number %i "%self.activations)
+        # logging.info("Activating Custom process - number %i " % self.activations)
         self.activations += 1
-        routing.invalid_cache_value = True # when the topology changes the cache of the Path.routing is outdated.
+        # In this case, the new users not change the topology
+        # routing.invalid_cache_value = True # when the service change the cache of the Path.routing is outdated.
 
-        if random.random()<0.7:
-        # We create a new node, between two other nodes.
-            node1 = random.sample(sim.topology.G.nodes(),1)[0]
-            node2 = random.sample(sim.topology.G.nodes(), 1)[0]
-            newId = list(sim.topology.G.nodes())[-1]
-            try:
-                newId = newId+1
-            except:
-                print("Be careful with the type of IDs in your Jsons (str or int)!!!!!")
-                exit()
 
-            # We create the new node and we define mandatory attr.
-            att = {"IPT":100}
-            sim.topology.G.add_node(int(newId),**att)
+        # We can introduce a new user or we move it
+        if len(self.listUsers)==0:
+            self.createUser(sim)
 
-            att = {"BW": 10, "PR": 10}
-            sim.topology.G.add_edge(int(node1), int(newId), **att)
-            sim.topology.G.add_edge(int(newId), int(node2), **att)
+        if random.random()<0.6:
+            # we create a new user
+            idDES = self.createUser(sim)
+            logging.info(" Creating a new user %i on node %i"%(idDES,self.placeAt[idDES]))
 
-            logging.info(" A new node is created between %i and %i with ID: %i"%(node1,node2,newId))
+        elif random.random()<0.8:
+            # we move a user from one node to other
+            userDES = random.sample(self.listUsers, 1)[0]
+            newNode = random.sample(sim.topology.G.nodes(), 1)[0]
+            logging.info(" Moving a user %i from node %i to %i" % (userDES, self.placeAt[userDES],newNode))
+            sim.alloc_DES[userDES] = newNode
+            self.placeAt[userDES] = newNode # only for log purporses.
         else:
-        # We drop a node.
-            code = random.sample(sim.topology.G.nodes(), 1)[0]
-            try:
-                ## ONE WAY
-                # edges_to_remove = [e for e in sim.topology.G.edges() if int(code) in e]
-                # for edge in edges_to_remove:
-                #     att = sim.topology.G[edge[0]][edge[1]]
-                #     sim.topology.G.remove_edge(*edge)
-
-                ## OTHER WAY
-                # sim.topology.G.remove_node(code)
-
-                ## Elegant way - we remove all process linked on it
-                if code!=0:
-                    sim.remove_node(code)
-
-            except nx.NetworkXError:
-                None
+            # we remove an user
+            userDES = random.sample(self.listUsers,1)[0]
+            sim.undeploy_source(userDES)
+            self.listUsers.remove(userDES)
+            logging.info(" Removing a user %i on node %i" % (userDES, self.placeAt[userDES]))
 
 
 
 def main(stop_time, it, folder_results):
-
 
     """
     TOPOLOGY
@@ -184,28 +136,31 @@ def main(stop_time, it, folder_results):
     """
     Deploy users
     """
-    userJSON = json.load(open('data/usersDefinition.json'))
-    for user in userJSON["sources"]:
-        app_name = user["app"]
-        app = s.apps[app_name]
-        msg = app.get_message(user["message"])
-        node = user["id_resource"]
-        dist = deterministic_distribution(100, name="Deterministic")
-        idDES = s.deploy_source(app_name, id_node=node, msg=msg, distribution=dist)
+    ### IN THIS CASE, We control the users from our custom strategy
+
+    # userJSON = json.load(open('data/usersDefinition.json'))
+    # for user in userJSON["sources"]:
+    #     app_name = user["app"]
+    #     app = s.apps[app_name]
+    #     msg = app.get_message(user["message"])
+    #     node = user["id_resource"]
+    #     dist = deterministic_distribution(100, name="Deterministic")
+    #     idDES = s.deploy_source(app_name, id_node=node, msg=msg, distribution=dist)
 
 
     """
     This internal monitor in the simulator (a DES process) changes the sim's behaviour. 
     You can have multiples monitors doing different or same tasks.
     
-    In this case: it changes the topology.
+    In this case, it changes the number or movement of users.
     """
+    listIdApps = [x["id"] for x in dataApp]
     dist = deterministicDistributionStartPoint(stop_time/4., stop_time/2.0/10.0, name="Deterministic")
-    evol = CustomStrategy(folder_results)
-    s.deploy_monitor("CrazyTopology",
+    evol = CustomStrategy(folder_results,listIdApps)
+    s.deploy_monitor("RandomAllocation",
                      evol,
                      dist,
-                     **{"sim": s, "routing": selectorPath}) # __call__ args 
+                     **{"sim": s, "routing": selectorPath}) # __call__ args
 
 
 
@@ -216,11 +171,8 @@ def main(stop_time, it, folder_results):
     s.run(stop_time)  # To test deployments put test_initial_deploy a TRUE
     s.print_debug_assignaments()
 
-    """
-    We store the new topology
-    """
-    nx.write_gexf(s.topology.G,folder_results+"theNew_topology.gexf") 
-    
+    print("Number of new users: %i"%len(evol.listUsers))
+
 
 if __name__ == '__main__':
 
@@ -230,7 +182,6 @@ if __name__ == '__main__':
     folder_results = Path("results/")
     folder_results.mkdir(parents=True, exist_ok=True)
     folder_results = str(folder_results)+"/"
-
 
     nIterations = 1  # iteration for each experiment
     simulationDuration = 20000
@@ -248,8 +199,17 @@ if __name__ == '__main__':
 
     print("Simulation Done!")
 
-    
-    # Analysing the results. 
+     # Analysing the results. 
     dfl = pd.read_csv(folder_results+"sim_trace"+"_link.csv")
     print("Number of total messages between nodes: %i"%len(dfl))
 
+    df = pd.read_csv(folder_results+"sim_trace.csv")
+    print("Number of requests handled by deployed services: %i"%len(df))
+
+    print(df.head())
+    print("Requested Apps %s"%np.unique(df.app)) #only few apps are required from the new users
+
+    dfapp6 = df[df.app == 6].copy()
+    
+    position_of_users_app6 = np.unique(dfapp6[dfapp6["module.src"] == "None"]["TOPO.src"])
+    print("Positions of the new users requesting app6: %s"%position_of_users_app6)
